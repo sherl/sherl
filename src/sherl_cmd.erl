@@ -14,21 +14,34 @@
 -record(state, {token=null, tokens=[], quote=null, escape=false,
                 f=fun dispatch/2}).
 
+-spec split(string()) -> [string()].
 split(S) ->
     State = #state{},
     lists:reverse((emit(lists:foldl(fun next/2, State, S)))#state.tokens).
 
+-spec join([string()]) -> string().
 join(Cmds) ->
     string:join(lists:map(fun escape/1, Cmds), " ").
 
-escape([C | S]) when ?QUOTE(C) orelse ?ESCAPE(C) orelse ?WHITESPACE(C) ->
-    [$\\, C | escape(S)];
-escape([C | S]) ->
-    [C | escape(S)];
-escape([]) ->
-    [].
+-spec escape(string()) -> string().
+escape(S) ->
+    case (S =:= [] orelse lists:any(fun should_escape/1, S)) of
+        true ->
+            [$" | escape_c(S)];
+        false ->
+            S
+    end.
 
 %% Internal API
+should_escape(C) ->
+    ?QUOTE(C) orelse ?ESCAPE(C) orelse ?WHITESPACE(C).
+
+escape_c([C | S]) when C =:= $" orelse C =:= $\\ ->
+    [$\\, C | escape_c(S)];
+escape_c([C | S]) ->
+    [C | escape_c(S)];
+escape_c([]) ->
+    [$"].
 
 next(C, S=#state{f=F}) ->
     F(C, S).
@@ -47,10 +60,13 @@ char(C, S=#state{token=null}) ->
 char(C, S=#state{token=T}) ->
     S#state{token=[C | T]}.
 
-whitespace(C, S) when S#state.token =/= null ->
-    whitespace(C, emit(S));
+ensure_token(S=#state{token=null}) ->
+    S#state{token=""};
+ensure_token(S) ->
+    S.
+
 whitespace(C, S) when ?WHITESPACE(C) ->
-    S;
+    emit(S);
 whitespace(C, S) ->
     next(C, S#state{f=fun dispatch/2}).
 
@@ -62,7 +78,7 @@ escape(C, S) ->
     (char(C, S))#state{escape=false, f=fun dispatch/2}.
 
 quote(C, S=#state{quote=null}) ->
-    S#state{quote=C};
+    ensure_token(S#state{quote=C});
 quote(C, S=#state{quote=$", escape=false}) when ?ESCAPE(C) ->
     S#state{escape=true};
 quote(C, S=#state{quote=$", escape=true}) when ?ESCAPE(C) orelse C =:= $" ->
